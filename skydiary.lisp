@@ -78,14 +78,24 @@
            ;;Define signal-group for text-view
            (calender-changed (make-instance 'signal-group
                                             :signals '("day-selected"))))
+      ;;
+      (gobject:connect-signal window "destroy"
+                              (lambda (w)
+                                (declare (ignore w))
+                                (gtk:leave-gtk-main)))
       ;;Utility functions
-      (labels ((init-fields ()
+      (labels ((show-calendar-info ()
+                                   (format t "Calender: ~A/~A/~A~%" 
+                                           (gtk:calendar-year calender)
+                                           (1+ (gtk:calendar-month calender))
+                                           (gtk:calendar-day calender)))
+               (init-fields ()
                             (setf (gtk:label-label date-label) 
                                   (format nil "~A/~A/~A" 
                                           (gtk:calendar-year calender)
                                           (1+ (gtk:calendar-month calender))
                                           (gtk:calendar-day calender)))
-                            ;;clear each field
+                            ;;そのカレンダーに表示されている日付の日記の内容を表示する
                             (multiple-value-bind (title weather main post memo)
                               (read-diary-xml (gtk:calendar-year calender) 
                                               (1+ (gtk:calendar-month calender))
@@ -96,22 +106,26 @@
                                 (setf (gtk:text-buffer-text (gtk:text-view-buffer memo-text-view)) memo)
                                 (setf (gtk:entry-text title-entry) title)
                                 (setf (gtk:entry-text weather-entry) weather)
+                                ;テキストは未編集状態になっているはず
                                 (setf *text-changed* nil))))
                (update-calender ()
-                                (setf (gtk:calendar-day calender) (local-time:timestamp-day current-date))
-                                (setf (gtk:calendar-month calender) (1- (local-time:timestamp-month current-date)))
-                                (setf (gtk:calendar-year calender) (local-time:timestamp-year current-date)))
+                                ;;内部時刻にあわせてカレンダーを変更する
+                                (psetf (gtk:calendar-day calender) (local-time:timestamp-day current-date)
+                                       (gtk:calendar-month calender) (1- (local-time:timestamp-month current-date))
+                                       (gtk:calendar-year calender) (local-time:timestamp-year current-date))
+                                (init-fields))
                (sync-date ()
+                          ;;内部時刻をカレンダーにあわせる
                           (setf current-date (local-time:parse-timestring (format nil "~A-~A-~A" 
                                                                                   (gtk:calendar-year calender)
                                                                                   (+  1 (gtk:calendar-month calender))
                                                                                   (gtk:calendar-day calender))))))
-        ;;Initialize date-label
+        ;;最初に表示されているタイトルバーを現在の日付にしておく
         (setf (gtk:label-label date-label)
               (local-time:format-timestring nil current-date :format '(:year #// :month #// :day)))
-        ;;Initialize calender
+        ;;カレンダーが今日をさすようにしておく
         (update-calender)
-        ;;Initialize fields
+        ;;今日の日記を表示する
         (init-fields)
         ;;Signal-handler for text-view in notebook
         (gobject:connect-signal
@@ -132,33 +146,34 @@
         ;;Signal-handler for calenders
         (connect-signal-group
           calender calender-changed
-          (lambda (calender)
+          (lambda (calendar)
             (if *text-changed*
-              (let ((diag (make-instance 'gtk:message-dialog
-                                         :text "日記が変更されています。編集内容を破棄しますか？"
-                                         :message-type :warning
-                                         :modal t
-                                         :buttons :ok-cancel)))
-                (gobject:connect-signal diag "response"
+              (let ((dialog (make-instance 'gtk:message-dialog
+                                           :text "日記が編集されています。編集内容を保存しますか？"
+                                           :modal t
+                                           :buttons :ok-cancel
+                                           :message-type :warning)))
+                (gobject:connect-signal dialog "response"
                                         (lambda (diag response-id)
-                                          (declare (ignore diag))
                                           (if (equal response-id -5)
                                             (progn
-                                              (setf prev-date current-date)
+                                              (output-diary-xml 
+                                                (local-time:timestamp-year prev-date)
+                                                (local-time:timestamp-month prev-date)
+                                                (local-time:timestamp-day prev-date)
+                                                (gtk:entry-text title-entry)
+                                                (gtk:entry-text weather-entry)
+                                                (gtk:text-buffer-text (gtk:text-view-buffer main-text-view))
+                                                (gtk:text-buffer-text (gtk:text-view-buffer post-text-view))
+                                                (gtk:text-buffer-text (gtk:text-view-buffer memo-text-view)))
                                               (init-fields))
-                                            (progn
-                                              (setf current-date prev-date)
-                                              (setf *text-changed* nil)
-                                              (setf *canceled* t)
-                                              (update-calender)))))
-                (unwind-protect (gtk:dialog-run diag) (gtk:object-destroy diag)))
-              (progn 
+                                            (init-fields))))
+                (unwind-protect (gtk:dialog-run dialog) 
+                  (gtk:object-destroy dialog)))
+              (progn
                 (when (not *action-from-toolbar*)
                   (sync-date))
-                (setf *action-from-toolbar* nil)
-                (when (not *canceled*)
-                  (init-fields))
-                (setf *canceled* nil)))))
+                (init-fields)))))
         ;;Signal-handler for each toolBar button
         (gobject:connect-signal quit-button
                                 "clicked"
@@ -179,6 +194,9 @@
                                     (gtk:text-buffer-text (gtk:text-view-buffer main-text-view))
                                     (gtk:text-buffer-text (gtk:text-view-buffer post-text-view))
                                     (gtk:text-buffer-text (gtk:text-view-buffer memo-text-view)))))
+        ;;ツールバーの日付の変更ボタンが選択されたら、内部時刻を変更して、
+        ;;それにカレンダーを同期させる（こうしないと一週間戻るとかが実装できない)
+        ;;ツールバーからの操作であることを指定（これによって内部時刻の方が正確であることをしめす）
         (gobject:connect-signal prev-year-button
                                 "clicked"
                                 (lambda (button)
@@ -292,4 +310,8 @@
         (setf post (xpath:string-value (xpath:evaluate "/diary/contents/post" document)))
         (setf memo (xpath:string-value (xpath:evaluate "/diary/contents/memo" document)))))
     (values title weather main post memo)))
-         
+
+(defun skydiary ()
+  (progn
+    (run)
+    (gtk:join-gtk-main)))

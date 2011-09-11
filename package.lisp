@@ -1,2 +1,3 @@
 (defpackage :skydiary
-  (:use :common-lisp :cl-user))
+  (:use :common-lisp :cl-user)
+  (:export #:skydiary))
