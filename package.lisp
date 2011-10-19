@@ -1,3 +1,3 @@
-(defpackage :skydiary
+(defpackage :nikki
   (:use :common-lisp :cl-user)
-  (:export #:skydiary))
+  (:export #:nikki))
