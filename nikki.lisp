@@ -46,7 +46,7 @@
            ;;Gtk+ components
            (builder 
              (make-instance 'gtk:builder
-                            :from-file "/home/masato/Desktop/nikki/nikki.glade"))
+                            :from-file "/home/hoge/Desktop/nikki/nikki.glade"))
            (window (gtk:builder-get-object builder
                                            "mainWindow"))
            (calender (gtk:builder-get-object builder
